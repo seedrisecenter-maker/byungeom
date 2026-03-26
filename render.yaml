@@ -1,0 +1,24 @@
+# Render.com deployment config
+# Connect GitHub repo → Render will auto-deploy
+
+services:
+  - type: web
+    name: byungeom-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free          # upgrade to starter ($7/mo) for persistent disk
+    region: oregon
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: ADMIN_SECRET
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false      # set manually in Render dashboard
+      - key: OPENAI_API_KEY
+        sync: false
+    disk:
+      name: byungeom-data
+      mountPath: /data
+      sizeGB: 1
+    healthCheckPath: /health

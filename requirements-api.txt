@@ -1,0 +1,10 @@
+# API server dependencies
+# Install: pip install -r requirements-api.txt
+
+fastapi>=0.111
+uvicorn[standard]>=0.29
+pydantic>=2.0
+
+# Optional model backends (install those you have keys for)
+google-genai>=1.0
+openai>=1.0
