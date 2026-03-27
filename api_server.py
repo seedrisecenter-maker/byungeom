@@ -37,7 +37,13 @@ from pydantic import BaseModel, Field
 BASE_DIR = Path(__file__).parent
 DB_PATH = Path(os.environ.get("DB_PATH", BASE_DIR / "byungeom_api.db"))
 
-ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "change-me-in-production")
+ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
+if not ADMIN_SECRET:
+    import warnings
+    warnings.warn(
+        "ADMIN_SECRET env var is not set — /admin endpoints are disabled until it is configured.",
+        stacklevel=1,
+    )
 
 FREE_DAILY_LIMIT = 5
 MAX_CODE_LENGTH = 20_000   # characters
@@ -200,6 +206,11 @@ async def require_api_key(
 async def require_admin(
     x_admin_secret: Annotated[str | None, Header(alias="X-Admin-Secret")] = None,
 ) -> None:
+    if not ADMIN_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Admin endpoints are not configured on this server",
+        )
     if not x_admin_secret or not secrets.compare_digest(x_admin_secret, ADMIN_SECRET):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -213,6 +224,7 @@ async def require_admin(
 
 _ip_lock: dict[str, float] = {}   # ip -> last request time (debounce)
 _DEBOUNCE_SEC = 2.0
+_IP_LOCK_MAX_SIZE = 50_000        # evict oldest entries when exceeded
 
 
 def _check_quota(key_row: sqlite3.Row) -> None:
@@ -239,6 +251,12 @@ def _check_debounce(ip: str) -> None:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many requests — wait a moment before retrying",
         )
+    # Evict stale entries to prevent unbounded memory growth
+    if len(_ip_lock) >= _IP_LOCK_MAX_SIZE:
+        cutoff = now - 60.0  # remove IPs idle for 60s+
+        stale = [k for k, v in _ip_lock.items() if v < cutoff]
+        for k in stale:
+            del _ip_lock[k]
     _ip_lock[ip] = now
 
 
@@ -253,12 +271,13 @@ async def lifespan(app: FastAPI):
     with _get_conn() as conn:
         count = conn.execute("SELECT COUNT(*) AS n FROM api_keys").fetchone()["n"]
         if count == 0:
-            demo_key = "byungeom-demo-free-key"
+            demo_key = f"byk-demo-{secrets.token_urlsafe(16)}"
             conn.execute(
                 "INSERT INTO api_keys (key_hash, label, tier, created_at) VALUES (?, ?, ?, ?)",
                 (_hash_key(demo_key), "demo", "free", datetime.now(timezone.utc).isoformat()),
             )
-            log.info("Created default demo key: %s", demo_key)
+            # NOTE: printed once at startup only — copy this key before it scrolls away
+            log.info("Created demo key (save this, shown once): %s", demo_key)
     yield
 
 
@@ -321,9 +340,10 @@ async def post_review(
     try:
         from byungeom import StarChamber
     except ImportError as exc:
+        log.error("byungeom import failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"byungeom package not installed on this server: {exc}",
+            detail="Review engine is temporarily unavailable. Please contact support.",
         ) from exc
 
     sc = StarChamber(
@@ -338,7 +358,7 @@ async def post_review(
         log.exception("StarChamber.review failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Review engine error: {exc}",
+            detail="Review engine encountered an error. Please try again later.",
         ) from exc
 
     duration_ms = int((time.monotonic() - t0) * 1000)

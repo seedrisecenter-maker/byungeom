@@ -82,11 +82,24 @@ byungeom applies the classical dialectic (正反合 / Thesis-Antithesis-Synthesi
 
 ```bash
 pip install byungeom
-
-byungeom generate "implement a thread-safe LRU cache"
 ```
 
-That's it. byungeom auto-detects which API keys you have set and activates the corresponding reviewers.
+```python
+import asyncio
+from byungeom import StarChamber
+
+async def main():
+    sc = StarChamber()
+    result = await sc.review(
+        code="def lru_cache(maxsize=128): ...",
+        goal="implement a thread-safe LRU cache"
+    )
+    print(result.worst_verdict)
+
+asyncio.run(main())
+```
+
+byungeom auto-detects which API keys you have set and activates the corresponding reviewers.
 
 ---
 
@@ -201,9 +214,6 @@ pip install byungeom[all]
 ### CLI
 
 ```bash
-# Basic generation
-byungeom generate "implement a thread-safe LRU cache"
-
 # With all v5.0 features enabled
 python orchestrator_v50.py "JWT authentication API" --all-upgrades
 
